@@ -114,9 +114,11 @@ impl UiNotifier {
         if let Ok(mut g) = self.ui.pending.lock() {
             *g = Some((state, play_sound));
         }
-        unsafe {
-            CFRunLoopSourceSignal(self.source as *mut c_void);
-            CFRunLoopWakeUp(self.main_rl as *mut c_void);
+        if self.source != 0 && self.main_rl != 0 {
+            unsafe {
+                CFRunLoopSourceSignal(self.source as *mut c_void);
+                CFRunLoopWakeUp(self.main_rl as *mut c_void);
+            }
         }
     }
 }
@@ -125,6 +127,7 @@ struct DaemonState {
     device: Box<dyn HardwareDevice>,
     ui: UiNotifier,
     volume: VolumeState,
+    last_hw: VolumeState,
     active: bool,
     tap: Option<MediaKeyTap>,
 }
@@ -141,6 +144,7 @@ impl DaemonState {
                 if self.device.connect().is_ok() {
                     if let Ok(hw_vol) = self.device.read_volume() {
                         self.volume = hw_vol;
+                        self.last_hw = hw_vol;
                     }
                     self.active = true;
                 } else {
@@ -164,10 +168,28 @@ impl DaemonState {
         if !self.active {
             return;
         }
+        match self.device.read_volume() {
+            Ok(hw_vol) => {
+                if hw_vol != self.last_hw {
+                    self.volume = hw_vol;
+                    self.last_hw = hw_vol;
+                }
+            }
+            Err(err) => {
+                eprintln!("Hardware read error: {err}");
+                self.device.disconnect();
+                self.active = false;
+                if let Some(tap) = &self.tap {
+                    tap.set_enabled(false);
+                }
+                return;
+            }
+        }
         let next = self.volume.apply(action);
         match self.device.write_volume(next) {
             Ok(()) => {
                 self.volume = next;
+                self.last_hw = self.device.read_volume().unwrap_or(next);
                 self.ui.notify(next, !next.is_muted());
             }
             Err(err) => {
@@ -476,6 +498,7 @@ fn main() -> ExitCode {
             ui: Arc::clone(&pending_ui),
         },
         volume: VolumeState::default(),
+        last_hw: VolumeState::default(),
         active: false,
         tap: None,
     }));
@@ -581,4 +604,125 @@ fn main() -> ExitCode {
     drop(_usb_watcher);
     unsafe { drop(Box::from_raw(ctx_ptr)) };
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use devices::{DeviceDescriptor, DeviceError};
+
+    struct NoopOsd;
+    impl OsdBackend for NoopOsd {
+        fn name(&self) -> &'static str {
+            "noop-test"
+        }
+        fn supports_version(&self, _version: osd::MacOsVersion) -> bool {
+            true
+        }
+        fn show_volume(&self, _state: VolumeState) -> Result<(), osd::OsdError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockDevice {
+        hw_vol: Arc<Mutex<VolumeState>>,
+        quantize_top: bool,
+        fail_write: Arc<Mutex<bool>>,
+        disconnected: Arc<Mutex<bool>>,
+    }
+
+    impl HardwareDevice for MockDevice {
+        fn descriptor(&self) -> DeviceDescriptor {
+            DeviceDescriptor {
+                id: "mock",
+                display_name: "Mock",
+                coreaudio_name_hints: &["Mock"],
+                usb_ids: &[],
+            }
+        }
+
+        fn connect(&mut self) -> Result<(), DeviceError> {
+            Ok(())
+        }
+
+        fn disconnect(&mut self) {
+            *self.disconnected.lock().unwrap() = true;
+        }
+
+        fn read_volume(&mut self) -> Result<VolumeState, DeviceError> {
+            let v = *self.hw_vol.lock().unwrap();
+            if self.quantize_top && v.step() >= 61 {
+                Ok(VolumeState::from_step(64, v.is_muted()))
+            } else {
+                Ok(v)
+            }
+        }
+
+        fn write_volume(&mut self, state: VolumeState) -> Result<(), DeviceError> {
+            if *self.fail_write.lock().unwrap() {
+                return Err(DeviceError::Io("mock write failure".to_string()));
+            }
+            *self.hw_vol.lock().unwrap() = state;
+            Ok(())
+        }
+    }
+
+    fn make_test_state(initial: VolumeState, quantize_top: bool) -> (DaemonState, MockDevice) {
+        let mock = MockDevice {
+            hw_vol: Arc::new(Mutex::new(initial)),
+            quantize_top,
+            fail_write: Arc::new(Mutex::new(false)),
+            disconnected: Arc::new(Mutex::new(false)),
+        };
+        let pending_ui = Arc::new(PendingUiUpdate {
+            osd: Arc::new(NoopOsd),
+            pending: Mutex::new(None),
+        });
+        let state = DaemonState {
+            device: Box::new(mock.clone()),
+            ui: UiNotifier {
+                main_rl: 0,
+                source: 0,
+                ui: pending_ui,
+            },
+            volume: initial,
+            last_hw: initial,
+            active: true,
+            tap: None,
+        };
+        (state, mock)
+    }
+
+    #[test]
+    fn syncs_external_knob_turn_before_stepping() {
+        let (mut state, mock) = make_test_state(VolumeState::from_step(32, false), false);
+        *mock.hw_vol.lock().unwrap() = VolumeState::from_step(16, false);
+
+        state.handle_action(VolumeAction::Up { fine: false });
+        assert_eq!(state.volume.step(), 20);
+        assert_eq!(mock.hw_vol.lock().unwrap().step(), 20);
+    }
+
+    #[test]
+    fn preserves_micro_step_when_hardware_quantizes_top_range() {
+        let (mut state, _mock) = make_test_state(VolumeState::from_step(64, false), true);
+
+        state.handle_action(VolumeAction::Down { fine: true });
+        assert_eq!(state.volume.step(), 63);
+        assert_eq!(state.last_hw.step(), 64);
+
+        state.handle_action(VolumeAction::Down { fine: true });
+        assert_eq!(state.volume.step(), 62);
+    }
+
+    #[test]
+    fn disconnects_and_deactivates_on_write_error() {
+        let (mut state, mock) = make_test_state(VolumeState::from_step(32, false), false);
+        *mock.fail_write.lock().unwrap() = true;
+
+        state.handle_action(VolumeAction::Up { fine: false });
+        assert!(!state.active);
+        assert!(*mock.disconnected.lock().unwrap());
+    }
 }
