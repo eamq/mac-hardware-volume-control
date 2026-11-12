@@ -61,6 +61,14 @@ const K_CF_NUMBER_SINT32_TYPE: isize = 3;
 static VOLUME_SOUND_POOL: OnceLock<Vec<u32>> = OnceLock::new();
 static NEXT_POOL_IDX: AtomicUsize = AtomicUsize::new(0);
 
+fn select_round_robin(pool: &[u32], counter: &AtomicUsize) -> Option<u32> {
+    if pool.is_empty() {
+        return None;
+    }
+    let idx = counter.fetch_add(1, Ordering::Relaxed) % pool.len();
+    Some(pool[idx])
+}
+
 fn next_volume_sound_id() -> Option<u32> {
     let pool = VOLUME_SOUND_POOL.get_or_init(|| unsafe {
         let url = CFURLCreateFromFileSystemRepresentation(
@@ -87,11 +95,7 @@ fn next_volume_sound_id() -> Option<u32> {
         ids
     });
 
-    if pool.is_empty() {
-        return None;
-    }
-    let idx = NEXT_POOL_IDX.fetch_add(1, Ordering::Relaxed) % pool.len();
-    Some(pool[idx])
+    select_round_robin(pool, &NEXT_POOL_IDX)
 }
 
 /// Returns `true` if `com.apple.sound.beep.feedback` is enabled (`1`/`true`) in `.GlobalPreferences`.
@@ -140,5 +144,32 @@ pub fn play_if_enabled() {
         unsafe {
             AudioServicesPlaySystemSound(sound_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_robin_cycles_through_sound_pool() {
+        assert_eq!(SOUND_POOL_SIZE, 4);
+        let counter = AtomicUsize::new(0);
+        let pool = [101, 102, 103, 104];
+        let picked: Vec<Option<u32>> = (0..6)
+            .map(|_| select_round_robin(&pool, &counter))
+            .collect();
+        assert_eq!(
+            picked,
+            vec![
+                Some(101),
+                Some(102),
+                Some(103),
+                Some(104),
+                Some(101),
+                Some(102)
+            ]
+        );
+        assert_eq!(select_round_robin(&[], &counter), None);
     }
 }
