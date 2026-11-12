@@ -125,6 +125,7 @@ struct DaemonState {
     device: Box<dyn HardwareDevice>,
     ui: UiNotifier,
     volume: VolumeState,
+    last_hw: VolumeState,
     active: bool,
     tap: Option<MediaKeyTap>,
 }
@@ -141,6 +142,7 @@ impl DaemonState {
                 if self.device.connect().is_ok() {
                     if let Ok(hw_vol) = self.device.read_volume() {
                         self.volume = hw_vol;
+                        self.last_hw = hw_vol;
                     }
                     self.active = true;
                 } else {
@@ -164,10 +166,28 @@ impl DaemonState {
         if !self.active {
             return;
         }
+        match self.device.read_volume() {
+            Ok(hw_vol) => {
+                if hw_vol != self.last_hw {
+                    self.volume = hw_vol;
+                    self.last_hw = hw_vol;
+                }
+            }
+            Err(err) => {
+                eprintln!("Hardware read error: {err}");
+                self.device.disconnect();
+                self.active = false;
+                if let Some(tap) = &self.tap {
+                    tap.set_enabled(false);
+                }
+                return;
+            }
+        }
         let next = self.volume.apply(action);
         match self.device.write_volume(next) {
             Ok(()) => {
                 self.volume = next;
+                self.last_hw = self.device.read_volume().unwrap_or(next);
                 self.ui.notify(next, !next.is_muted());
             }
             Err(err) => {
@@ -476,6 +496,7 @@ fn main() -> ExitCode {
             ui: Arc::clone(&pending_ui),
         },
         volume: VolumeState::default(),
+        last_hw: VolumeState::default(),
         active: false,
         tap: None,
     }));
