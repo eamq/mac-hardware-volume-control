@@ -31,7 +31,7 @@ Common workarounds introduce trade-offs:
 
 ### Prerequisites
 
-- **macOS:** macOS 11+ (tested on macOS 26/27 Tahoe).
+- **macOS:** macOS 11+ (tested on macOS 15 in CI and macOS 27).
 - **Architecture:** Apple Silicon (`aarch64-apple-darwin`) or Intel (`x86_64-apple-darwin`).
 - **Toolchain:** [Rust & Cargo](https://www.rust-lang.org/tools/install) (Edition 2021+).
 - **Permission:** Accessibility permission only (`CGEventTap`).
