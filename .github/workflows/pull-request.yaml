@@ -1,0 +1,50 @@
+name: Pull Request CI
+
+on: pull_request
+
+jobs:
+  lint-and-test:
+    name: Lint & Test (macOS Apple Silicon)
+    runs-on: macos-15 # Apple Silicon (arm64)
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install ShellCheck & BATS
+        run: brew install shellcheck bats-core
+
+      - name: Check Formatting
+        run: cargo fmt -- --check
+
+      - name: Run Clippy (Linter)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Shell Script Static Analysis
+        run: shellcheck scripts/*.sh
+
+      - name: Run Cargo Tests
+        run: cargo test --release
+
+      - name: Build Release Binary & CLI Smoke Tests
+        run: |
+          cargo build --release
+          ./target/release/mac-hardware-volume-control --help
+          ./target/release/mac-hardware-volume-control --version
+          ./target/release/mac-hardware-volume-control --list-devices
+          ./target/release/mac-hardware-volume-control --status
+
+      - name: Validate launchd Plist Template
+        run: |
+          sed -e 's|__SERVICE_LABEL__|com.user.mac-hardware-volume-control|g' \
+              -e 's|__BINARY_PATH__|/usr/local/bin/mac-hardware-volume-control|g' \
+              assets/com.user.mac-hardware-volume-control.plist.template > /tmp/ci-test.plist
+          plutil -lint /tmp/ci-test.plist
+
+      - name: Run Script Integration Tests (BATS)
+        run: bats tests/scripts.bats
