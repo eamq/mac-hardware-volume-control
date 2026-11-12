@@ -3,14 +3,18 @@
 //! (`NSGlobalDomain` / `com.apple.sound.beep.feedback`).
 //!
 //! Uses `AudioToolbox` System Sound Services (`AudioServicesPlaySystemSound`)
-//! rather than `NSSound` / `AVAudioEngine` so it never triggers microphone
-//! privacy prompts.
+//! so playback is handled out-of-process by `coreaudiod` and never triggers
+//! microphone privacy prompts. A small round-robin pool of `SystemSoundID`
+//! handles lets rapid key presses overlap naturally instead of coalescing on a
+//! single in-flight ID.
 
 use std::ffi::{c_char, c_void, CString};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 const VOLUME_AIFF_PATH: &str =
     "/System/Library/LoginPlugins/BezelServices.loginPlugin/Contents/Resources/volume.aiff";
+const SOUND_POOL_SIZE: usize = 4;
 
 #[link(name = "AudioToolbox", kind = "framework")]
 extern "C" {
@@ -54,10 +58,11 @@ extern "C" {
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const K_CF_NUMBER_SINT32_TYPE: isize = 3;
 
-static VOLUME_SOUND_ID: OnceLock<Option<u32>> = OnceLock::new();
+static VOLUME_SOUND_POOL: OnceLock<Vec<u32>> = OnceLock::new();
+static NEXT_POOL_IDX: AtomicUsize = AtomicUsize::new(0);
 
-fn get_volume_sound_id() -> Option<u32> {
-    *VOLUME_SOUND_ID.get_or_init(|| unsafe {
+fn next_volume_sound_id() -> Option<u32> {
+    let pool = VOLUME_SOUND_POOL.get_or_init(|| unsafe {
         let url = CFURLCreateFromFileSystemRepresentation(
             std::ptr::null(),
             VOLUME_AIFF_PATH.as_ptr(),
@@ -65,18 +70,28 @@ fn get_volume_sound_id() -> Option<u32> {
             false,
         );
         if url.is_null() {
-            return None;
+            return Vec::new();
         }
-        let mut sound_id: u32 = 0;
-        let status = AudioServicesCreateSystemSoundID(url, &mut sound_id);
+        let mut ids = Vec::with_capacity(SOUND_POOL_SIZE);
+        for _ in 0..SOUND_POOL_SIZE {
+            let mut sound_id: u32 = 0;
+            let status = AudioServicesCreateSystemSoundID(url, &mut sound_id);
+            if status == 0 {
+                ids.push(sound_id);
+            } else {
+                eprintln!("AudioServicesCreateSystemSoundID failed: {status}");
+                break;
+            }
+        }
         CFRelease(url);
-        if status == 0 {
-            Some(sound_id)
-        } else {
-            eprintln!("AudioServicesCreateSystemSoundID failed: {status}");
-            None
-        }
-    })
+        ids
+    });
+
+    if pool.is_empty() {
+        return None;
+    }
+    let idx = NEXT_POOL_IDX.fetch_add(1, Ordering::Relaxed) % pool.len();
+    Some(pool[idx])
 }
 
 /// Returns `true` if `com.apple.sound.beep.feedback` is enabled (`1`/`true`) in `.GlobalPreferences`.
@@ -121,7 +136,7 @@ pub fn play_if_enabled() {
     if !is_feedback_enabled() {
         return;
     }
-    if let Some(sound_id) = get_volume_sound_id() {
+    if let Some(sound_id) = next_volume_sound_id() {
         unsafe {
             AudioServicesPlaySystemSound(sound_id);
         }
