@@ -4,8 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+# shellcheck source=scripts/lib/codesign.sh
+source "$SCRIPT_DIR/lib/codesign.sh"
+
 DRY_RUN="${DRY_RUN:-0}"
 DEVICE_ID="${DEVICE_ID:-}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+CODESIGN_CERT_NAME="mac-hardware-volume-control"
+SKIP_CODESIGN="${SKIP_CODESIGN:-0}"
 PREFIX="${PREFIX:-/usr/local}"
 BIN_DIR="${BIN_DIR:-$PREFIX/bin}"
 LAUNCH_AGENTS_DIR="${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
@@ -19,9 +27,10 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --device <id>   Explicitly select hardware backend ID (e.g., scarlett-gen4)
-  --dry-run       Print actions without modifying the system
-  -h, --help      Show this help message
+  --device <id>       Explicitly select hardware backend ID (e.g., scarlett-gen4)
+  --codesign <id>     Sign installed binary with a Keychain code-signing identity
+  --dry-run           Print actions without modifying the system
+  -h, --help          Show this help message
 EOF
 }
 
@@ -39,6 +48,14 @@ while [ $# -gt 0 ]; do
       DEVICE_ID="$2"
       shift 2
       ;;
+    --codesign)
+      if [ $# -lt 2 ]; then
+        echo "Error: --codesign requires an argument." >&2
+        exit 2
+      fi
+      CODESIGN_IDENTITY="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -50,28 +67,6 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
-
-run_cmd() {
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[DRY RUN] $*"
-  else
-    "$@"
-  fi
-}
-
-maybe_sudo() {
-  local target_dir="$1"
-  shift
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[DRY RUN] $*"
-    return
-  fi
-  if [ -w "$target_dir" ] || { [ ! -e "$target_dir" ] && [ -w "$(dirname "$target_dir")" ]; }; then
-    "$@"
-  else
-    sudo "$@"
-  fi
-}
 
 if ! command -v cargo &> /dev/null; then
   echo "Error: Cargo/Rust toolchain not found."
@@ -94,7 +89,7 @@ PLIST_DEST="$LAUNCH_AGENTS_DIR/${SERVICE_LABEL}.plist"
 CONFIG_DEST="$CONFIG_DIR/config.json"
 USER_ID="$(id -u)"
 
-echo "Building release binary..."
+step "Building release binary..."
 run_cmd cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml"
 
 BUILT_BIN="$REPO_ROOT/target/release/mac-hardware-volume-control"
@@ -106,32 +101,41 @@ if [ -z "$DEVICE_ID" ]; then
   elif [ -x "$BUILT_BIN" ]; then
     if DETECTED_LINE="$("$BUILT_BIN" --detect 2>/dev/null | head -n 1)" && [ -n "$DETECTED_LINE" ]; then
       DEVICE_ID="$(printf '%s' "$DETECTED_LINE" | cut -f1)"
-      echo "Auto-detected hardware device: $DEVICE_ID"
+      echo "  Auto-detected hardware device: $DEVICE_ID"
     else
       DEVICE_ID="scarlett-gen4"
-      echo "No supported hardware detected; defaulting to '$DEVICE_ID'."
+      echo "  No supported hardware detected; defaulting to '$DEVICE_ID'."
     fi
   else
     DEVICE_ID="scarlett-gen4"
   fi
 fi
 
-echo "Ensuring target directories exist..."
+step "Preparing directories and signing..."
 run_cmd mkdir -p "$LAUNCH_AGENTS_DIR" "$CONFIG_DIR"
-maybe_sudo "$BIN_DIR" mkdir -p "$BIN_DIR"
+if [ ! -d "$BIN_DIR" ]; then
+  maybe_sudo "$BIN_DIR" mkdir -p "$BIN_DIR"
+fi
 
-echo "Installing binary to $TARGET_BIN..."
-maybe_sudo "$BIN_DIR" cp "$BUILT_BIN" "$TARGET_BIN"
-maybe_sudo "$BIN_DIR" chmod 755 "$TARGET_BIN"
+ensure_codesign_identity
 
-echo "Writing configuration to $CONFIG_DEST..."
+if [ -n "$CODESIGN_IDENTITY" ]; then
+  echo "  Signing release binary with '$CODESIGN_IDENTITY'..."
+  run_cmd codesign --force --sign "$CODESIGN_IDENTITY" "$BUILT_BIN"
+fi
+
+step "Installing binary, config, and LaunchAgent..."
+echo "  Binary: $TARGET_BIN"
+maybe_sudo "$BIN_DIR" install -m 755 "$BUILT_BIN" "$TARGET_BIN"
+
+echo "  Config: $CONFIG_DEST (device: $DEVICE_ID)"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[DRY RUN] render $CONFIG_TEMPLATE -> $CONFIG_DEST (device_id=$DEVICE_ID)"
 else
   sed "s|__DEVICE_ID__|$DEVICE_ID|g" "$CONFIG_TEMPLATE" > "$CONFIG_DEST"
 fi
 
-echo "Installing launchd plist to $PLIST_DEST..."
+echo "  Plist:  $PLIST_DEST"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[DRY RUN] render $PLIST_TEMPLATE -> $PLIST_DEST"
 else
@@ -144,10 +148,14 @@ fi
 if [ "${SKIP_LAUNCHCTL:-0}" -eq 1 ]; then
   echo "Skipping launchctl bootstrap (SKIP_LAUNCHCTL=1)."
 else
-  echo "Loading launchd service..."
+  step "Loading launchd service..."
+  echo "  Service: gui/$USER_ID/$SERVICE_LABEL"
   run_cmd launchctl bootout "gui/$USER_ID" "$PLIST_DEST" 2>/dev/null || true
   run_cmd launchctl bootstrap "gui/$USER_ID" "$PLIST_DEST"
 fi
 
-echo "Installation complete (device: $DEVICE_ID)."
-echo "Note: Grant Accessibility permission to $TARGET_BIN in System Settings -> Privacy & Security -> Accessibility."
+if [ -t 1 ]; then
+  printf '\n\033[1;32mInstallation complete\033[0m (device: %s).\n' "$DEVICE_ID"
+else
+  printf '\nInstallation complete (device: %s).\n' "$DEVICE_ID"
+fi
