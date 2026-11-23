@@ -4,9 +4,9 @@
 //! Tahoe's `SystemBannerService` is entitlement-gated). Additional macOS HUD
 //! backends can be added in `src/osd/` and registered in [`select_backend`].
 
-pub mod macos_liquid_glass;
 pub mod noop;
 mod osd_framework;
+pub mod osd_ui_helper;
 
 use crate::volume::VolumeState;
 use std::fmt;
@@ -76,7 +76,7 @@ impl std::error::Error for OsdError {}
 
 /// Abstraction over macOS On-Screen Display (HUD) rendering backends.
 pub trait OsdBackend: Send + Sync {
-    /// Human-readable backend identifier (e.g., `"macos-liquid-glass"`).
+    /// Human-readable backend identifier (e.g., `"osdui-helper"`).
     fn name(&self) -> &'static str;
 
     /// Returns `true` if this backend supports the given macOS version.
@@ -103,9 +103,9 @@ pub fn detect_macos_version() -> MacOsVersion {
 /// Selects the best [`OsdBackend`] for the given macOS version at runtime.
 #[must_use]
 pub fn select_backend(version: MacOsVersion) -> Box<dyn OsdBackend> {
-    let liquid_glass = macos_liquid_glass::LiquidGlassOsd::new();
-    if liquid_glass.supports_version(version) {
-        return Box::new(liquid_glass);
+    let osd = osd_ui_helper::OsdUiHelperOsd::new();
+    if osd.supports_version(version) {
+        return Box::new(osd);
     }
 
     Box::new(noop::NoopOsd)
@@ -131,14 +131,14 @@ mod tests {
     }
 
     #[test]
-    fn dispatches_liquid_glass_for_tahoe_and_newer() {
+    fn dispatches_osdui_helper_for_tahoe_and_newer() {
         assert_eq!(
             select_backend(MacOsVersion::new(26, 0, 0)).name(),
-            "macos-liquid-glass"
+            "osdui-helper"
         );
         assert_eq!(
             select_backend(MacOsVersion::new(27, 0, 1)).name(),
-            "macos-liquid-glass"
+            "osdui-helper"
         );
         assert_eq!(select_backend(MacOsVersion::new(15, 4, 0)).name(), "noop");
     }

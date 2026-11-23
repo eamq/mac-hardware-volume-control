@@ -11,12 +11,7 @@ use std::process::{Command, ExitCode, Stdio};
 
 const SERVICE_LABEL: &str = "com.user.mac-hardware-volume-control";
 
-pub enum CliOutcome {
-    Exit(ExitCode),
-    RunDaemon { device_override: Option<String> },
-}
-
-enum CliAction {
+pub enum CliCommand {
     Help,
     Version,
     Start,
@@ -27,53 +22,72 @@ enum CliAction {
     TestOsd(u8),
     ProbeFocusriteUsb,
     ProbeFcp,
-    Daemon,
 }
 
-pub fn run() -> CliOutcome {
+pub struct ParsedCli {
+    pub command: Option<CliCommand>,
+    pub device_override: Option<String>,
+}
+
+pub fn parse() -> Result<ParsedCli, ExitCode> {
     let args: Vec<String> = env::args().skip(1).collect();
     match parse_args(&args) {
-        Ok((CliAction::Help, _)) => {
-            print_help();
-            CliOutcome::Exit(ExitCode::SUCCESS)
-        }
-        Ok((CliAction::Version, _)) => {
-            println!("mac-hardware-volume-control {}", env!("CARGO_PKG_VERSION"));
-            CliOutcome::Exit(ExitCode::SUCCESS)
-        }
-        Ok((CliAction::Start, _)) => CliOutcome::Exit(run_start()),
-        Ok((CliAction::Stop, _)) => CliOutcome::Exit(run_stop()),
-        Ok((CliAction::Detect, _)) => CliOutcome::Exit(run_detect()),
-        Ok((CliAction::ListDevices, _)) => CliOutcome::Exit(run_list_devices()),
-        Ok((CliAction::Status, dev)) => CliOutcome::Exit(run_status(dev.as_deref())),
-        Ok((CliAction::TestOsd(step), _)) => CliOutcome::Exit(run_test_osd(step)),
-        Ok((CliAction::ProbeFocusriteUsb, _)) => CliOutcome::Exit(run_probe_focusrite_usb()),
-        Ok((CliAction::ProbeFcp, _)) => CliOutcome::Exit(run_probe_fcp()),
-        Ok((CliAction::Daemon, device_override)) => CliOutcome::RunDaemon { device_override },
+        Ok(parsed) => Ok(parsed),
         Err((msg, show_help)) => {
             eprintln!("{msg}");
             if show_help {
                 print_help();
             }
-            CliOutcome::Exit(ExitCode::from(2))
+            Err(ExitCode::from(2))
         }
     }
 }
 
-fn parse_args(args: &[String]) -> Result<(CliAction, Option<String>), (String, bool)> {
+pub fn execute(command: CliCommand, device_override: Option<&str>) -> ExitCode {
+    match command {
+        CliCommand::Help => {
+            print_help();
+            ExitCode::SUCCESS
+        }
+        CliCommand::Version => {
+            println!("mac-hardware-volume-control {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        CliCommand::Start => run_start(),
+        CliCommand::Stop => run_stop(),
+        CliCommand::Detect => run_detect(),
+        CliCommand::ListDevices => run_list_devices(),
+        CliCommand::Status => run_status(device_override),
+        CliCommand::TestOsd(step) => run_test_osd(step),
+        CliCommand::ProbeFocusriteUsb => run_probe_focusrite_usb(),
+        CliCommand::ProbeFcp => run_probe_fcp(),
+    }
+}
+
+fn parse_args(args: &[String]) -> Result<ParsedCli, (String, bool)> {
     let mut device_override: Option<String> = None;
-    let mut action: Option<CliAction> = None;
+    let mut command: Option<CliCommand> = None;
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "-h" | "--help" => return Ok((CliAction::Help, device_override)),
-            "-v" | "--version" => return Ok((CliAction::Version, device_override)),
-            "--start" => action = Some(CliAction::Start),
-            "--stop" => action = Some(CliAction::Stop),
-            "--detect" => action = Some(CliAction::Detect),
-            "--list-devices" => action = Some(CliAction::ListDevices),
-            "--status" => action = Some(CliAction::Status),
+            "-h" | "--help" => {
+                return Ok(ParsedCli {
+                    command: Some(CliCommand::Help),
+                    device_override,
+                });
+            }
+            "-v" | "--version" => {
+                return Ok(ParsedCli {
+                    command: Some(CliCommand::Version),
+                    device_override,
+                });
+            }
+            "--start" => command = Some(CliCommand::Start),
+            "--stop" => command = Some(CliCommand::Stop),
+            "--detect" => command = Some(CliCommand::Detect),
+            "--list-devices" => command = Some(CliCommand::ListDevices),
+            "--status" => command = Some(CliCommand::Status),
             "--test-osd" => {
                 i += 1;
                 let Some(val) = args.get(i) else {
@@ -88,10 +102,10 @@ fn parse_args(args: &[String]) -> Result<(CliAction, Option<String>), (String, b
                         false,
                     ));
                 };
-                action = Some(CliAction::TestOsd(step));
+                command = Some(CliCommand::TestOsd(step));
             }
-            "--probe-focusrite-usb" => action = Some(CliAction::ProbeFocusriteUsb),
-            "--probe-fcp" => action = Some(CliAction::ProbeFcp),
+            "--probe-focusrite-usb" => command = Some(CliCommand::ProbeFocusriteUsb),
+            "--probe-fcp" => command = Some(CliCommand::ProbeFcp),
             "--device" => {
                 i += 1;
                 if let Some(val) = args.get(i) {
@@ -105,7 +119,10 @@ fn parse_args(args: &[String]) -> Result<(CliAction, Option<String>), (String, b
         i += 1;
     }
 
-    Ok((action.unwrap_or(CliAction::Daemon), device_override))
+    Ok(ParsedCli {
+        command,
+        device_override,
+    })
 }
 
 fn run_test_osd(step: u8) -> ExitCode {
@@ -347,8 +364,8 @@ mod tests {
             "--device".to_string(),
             "scarlett-gen4".to_string(),
         ];
-        let (action, dev) = parse_args(&args).expect("should parse --status --device");
-        assert!(matches!(action, CliAction::Status));
-        assert_eq!(dev.as_deref(), Some("scarlett-gen4"));
+        let parsed = parse_args(&args).expect("should parse --status --device");
+        assert!(matches!(parsed.command, Some(CliCommand::Status)));
+        assert_eq!(parsed.device_override.as_deref(), Some("scarlett-gen4"));
     }
 }

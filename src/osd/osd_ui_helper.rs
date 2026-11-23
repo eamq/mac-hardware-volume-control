@@ -1,4 +1,4 @@
-//! macOS 26/27 (Tahoe+) native OSD HUD backend.
+//! macOS `com.apple.OSDUIHelper` native bezel HUD backend.
 //!
 //! Dispatches native volume/mute HUD updates through `com.apple.OSDUIHelper`
 //! (with `OSDManager` fallback) using the 0-64 discrete grid so the HUD bar
@@ -12,15 +12,15 @@ const MIN_SUPPORTED_VERSION: MacOsVersion = MacOsVersion::new(26, 0, 0);
 const DEFAULT_FADE_MSEC: u32 = 1500;
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct LiquidGlassOsd;
+pub struct OsdUiHelperOsd;
 
-impl LiquidGlassOsd {
+impl OsdUiHelperOsd {
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Computes `(graphic_type, filled_chiclets, total_chiclets)` for the 65-step grid.
+    /// Computes `(graphic_type, filled_chiclets, total_chiclets)` for the 0-64 grid.
     #[must_use]
     pub const fn hud_params(state: VolumeState) -> (u64, u32, u32) {
         if state.is_muted() {
@@ -35,9 +35,9 @@ impl LiquidGlassOsd {
     }
 }
 
-impl OsdBackend for LiquidGlassOsd {
+impl OsdBackend for OsdUiHelperOsd {
     fn name(&self) -> &'static str {
-        "macos-liquid-glass"
+        "osdui-helper"
     }
 
     fn supports_version(&self, version: MacOsVersion) -> bool {
@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn supports_macos_26_and_newer() {
-        let osd = LiquidGlassOsd::new();
+        let osd = OsdUiHelperOsd::new();
         assert!(!osd.supports_version(MacOsVersion::new(15, 5, 0)));
         assert!(osd.supports_version(MacOsVersion::new(26, 0, 0)));
         assert!(osd.supports_version(MacOsVersion::new(27, 0, 1)));
@@ -65,11 +65,11 @@ mod tests {
     #[test]
     fn maps_volume_and_mute_to_64_step_hud_params() {
         assert_eq!(
-            LiquidGlassOsd::hud_params(VolumeState::from_step(32, false)),
+            OsdUiHelperOsd::hud_params(VolumeState::from_step(32, false)),
             (OSD_GRAPHIC_VOLUME, 32, 64)
         );
         assert_eq!(
-            LiquidGlassOsd::hud_params(VolumeState::from_step(32, true)),
+            OsdUiHelperOsd::hud_params(VolumeState::from_step(32, true)),
             (OSD_GRAPHIC_MUTE, 0, 64)
         );
     }

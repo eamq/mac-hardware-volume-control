@@ -122,7 +122,7 @@ graph TD
 - `src/osd/`
   - `mod.rs` — `OsdBackend` trait and `MacOsVersion` runtime dispatcher
   - `osd_framework.rs` — `com.apple.OSDUIHelper` XPC bridge (with `OSDManager` fallback)
-  - `macos_liquid_glass.rs` — Tahoe dispatch wrapper
+  - `osd_ui_helper.rs` — Tahoe+ `OSDUIHelper` backend
   - `noop.rs` — Headless/fallback backend
 - `src/platform/`
   - `app_watcher.rs` — `NSWorkspace` launch/terminate observer for conflicting vendor apps

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_CODESIGN="${SKIP_CODESIGN:-0}"
 CODESIGN_CERT_NAME="mac-hardware-volume-control"
@@ -21,36 +26,6 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
-
-step() {
-  if [ -t 1 ]; then
-    printf '\n\033[1m==>\033[0m %s\n' "$1"
-  else
-    printf '\n==> %s\n' "$1"
-  fi
-}
-
-run_cmd() {
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[DRY RUN] $*"
-  else
-    "$@"
-  fi
-}
-
-maybe_sudo() {
-  local target_dir="$1"
-  shift
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[DRY RUN] $*"
-    return
-  fi
-  if [ -w "$target_dir" ]; then
-    "$@"
-  else
-    sudo "$@"
-  fi
-}
 
 SERVICE_NAME="com.user.mac-hardware-volume-control"
 PLIST_NAME="${SERVICE_NAME}.plist"
@@ -106,4 +81,8 @@ fi
 
 echo ""
 echo "Uninstallation complete."
-echo "Note: To remove the leftover permission entry, open System Settings -> Privacy & Security -> Device Control and Data Access (Accessibility on macOS 26 and earlier) and remove mac-hardware-volume-control."
+if [ -t 1 ]; then
+  printf '\033[1;33mNote:\033[0m To remove the leftover permission entry, open System Settings -> Privacy & Security -> Device Control and Data Access (Accessibility on macOS 26 and earlier) and remove mac-hardware-volume-control.\n'
+else
+  echo "Note: To remove the leftover permission entry, open System Settings -> Privacy & Security -> Device Control and Data Access (Accessibility on macOS 26 and earlier) and remove mac-hardware-volume-control."
+fi

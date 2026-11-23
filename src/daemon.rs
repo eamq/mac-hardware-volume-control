@@ -582,7 +582,7 @@ mod tests {
         }
 
         fn conflicting_app_prefixes(&self) -> &'static [&'static str] {
-            &["com.focusrite."]
+            &["com.example.vendor."]
         }
     }
 
@@ -651,7 +651,7 @@ mod tests {
         let (mut state, mock) = make_test_state(VolumeState::from_step(32, false), false);
         assert!(state.active);
 
-        state.on_conflicting_app_launched("com.focusrite.FocusriteControl2");
+        state.on_conflicting_app_launched("com.example.vendor.ControlApp");
         assert!(!state.active);
         assert!(state.conflicting_app_running);
         assert!(*mock.disconnected.lock().unwrap());

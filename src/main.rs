@@ -11,8 +11,13 @@ mod volume;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match cli::run() {
-        cli::CliOutcome::Exit(code) => code,
-        cli::CliOutcome::RunDaemon { device_override } => daemon::run(device_override.as_deref()),
+    let parsed = match cli::parse() {
+        Ok(parsed) => parsed,
+        Err(code) => return code,
+    };
+
+    match parsed.command {
+        Some(cmd) => cli::execute(cmd, parsed.device_override.as_deref()),
+        None => daemon::run(parsed.device_override.as_deref()),
     }
 }
