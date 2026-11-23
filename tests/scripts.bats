@@ -6,6 +6,7 @@ setup() {
   export LAUNCH_AGENTS_DIR="$TEST_TMP/LaunchAgents"
   export CONFIG_DIR="$TEST_TMP/config"
   export SKIP_LAUNCHCTL=1
+  export SKIP_CODESIGN=1
 
   BACKUP_BIN=""
   if [ -e target/release/mac-hardware-volume-control ]; then
@@ -23,18 +24,21 @@ teardown() {
 }
 
 @test "install.sh runs cleanly in dry-run mode" {
-  DRY_RUN=1 run ./scripts/install.sh --dry-run
+  DRY_RUN=1 run ./scripts/install.sh --dry-run --codesign "test-cert"
   [ "$status" -eq 0 ]
   [[ "$output" =~ "Building release binary..." ]]
   [[ "$output" =~ "[DRY RUN] cargo build --release" ]]
+  [[ "$output" =~ "codesign --force --sign test-cert" ]]
   [[ "$output" =~ "assets/com.user.mac-hardware-volume-control.plist.template" ]]
 }
 
 @test "uninstall.sh runs cleanly in dry-run mode" {
-  DRY_RUN=1 run ./scripts/uninstall.sh --dry-run
+  SKIP_CODESIGN=0 DRY_RUN=1 run ./scripts/uninstall.sh --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" =~ "Stopping and unloading launchd service..." ]]
   [[ "$output" =~ "[DRY RUN]" ]]
+  [[ "$output" =~ "security delete-identity -t -c mac-hardware-volume-control" ]]
+  [[ "$output" =~ "Device Control and Data Access" ]]
 }
 
 @test "install.sh fails gracefully when cargo is missing" {
@@ -60,7 +64,7 @@ teardown() {
   [[ "$(cat "$CONFIG_DIR/config.json")" =~ "scarlett-gen4" ]]
   plutil -lint "$LAUNCH_AGENTS_DIR/com.user.mac-hardware-volume-control.plist"
 
-  run ./scripts/uninstall.sh --purge-config
+  run ./scripts/uninstall.sh
   [ "$status" -eq 0 ]
   [ ! -e "$PREFIX/bin/mac-hardware-volume-control" ]
   [ ! -e "$LAUNCH_AGENTS_DIR/com.user.mac-hardware-volume-control.plist" ]

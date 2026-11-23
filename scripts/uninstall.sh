@@ -2,7 +2,8 @@
 set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-0}"
-PURGE_CONFIG=0
+SKIP_CODESIGN="${SKIP_CODESIGN:-0}"
+CODESIGN_CERT_NAME="mac-hardware-volume-control"
 PREFIX="${PREFIX:-/usr/local}"
 BIN_DIR="${BIN_DIR:-$PREFIX/bin}"
 LAUNCH_AGENTS_DIR="${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
@@ -14,16 +15,20 @@ while [ $# -gt 0 ]; do
       DRY_RUN=1
       shift
       ;;
-    --purge-config)
-      PURGE_CONFIG=1
-      shift
-      ;;
     *)
       echo "Error: Unknown option '$1'." >&2
       exit 2
       ;;
   esac
 done
+
+step() {
+  if [ -t 1 ]; then
+    printf '\n\033[1m==>\033[0m %s\n' "$1"
+  else
+    printf '\n==> %s\n' "$1"
+  fi
+}
 
 run_cmd() {
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -54,7 +59,7 @@ PLIST_DEST="$LAUNCH_AGENTS_DIR/$PLIST_NAME"
 CONFIG_DEST="$CONFIG_DIR/config.json"
 USER_ID="$(id -u)"
 
-echo "Stopping and unloading launchd service..."
+step "Stopping and unloading launchd service..."
 if [ "${SKIP_LAUNCHCTL:-0}" -eq 1 ]; then
   echo "Skipping launchctl bootout (SKIP_LAUNCHCTL=1)."
 elif [ "$DRY_RUN" -eq 1 ]; then
@@ -69,19 +74,36 @@ else
   fi
 fi
 
+step "Removing installed files..."
 if [ -f "$PLIST_DEST" ] || [ "$DRY_RUN" -eq 1 ]; then
-  echo "Removing plist from $PLIST_DEST..."
+  echo "  Plist:  $PLIST_DEST"
   run_cmd rm -f "$PLIST_DEST"
 fi
 
 if [ -f "$TARGET_BIN" ] || [ "$DRY_RUN" -eq 1 ]; then
-  echo "Removing binary from $TARGET_BIN..."
+  echo "  Binary: $TARGET_BIN"
   maybe_sudo "$BIN_DIR" rm -f "$TARGET_BIN"
 fi
 
-if [ "$PURGE_CONFIG" -eq 1 ] && { [ -f "$CONFIG_DEST" ] || [ "$DRY_RUN" -eq 1 ]; }; then
-  echo "Removing config from $CONFIG_DEST..."
+if [ -f "$CONFIG_DEST" ] || [ "$DRY_RUN" -eq 1 ]; then
+  echo "  Config: $CONFIG_DEST"
   run_cmd rm -f "$CONFIG_DEST"
+  if [ "$DRY_RUN" -eq 0 ] && [ -d "$CONFIG_DIR" ]; then
+    rmdir "$CONFIG_DIR" 2>/dev/null || true
+  fi
 fi
 
+KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+if [ "$SKIP_CODESIGN" -eq 1 ]; then
+  echo "Skipping keychain certificate removal (SKIP_CODESIGN=1)."
+elif [ "$DRY_RUN" -eq 1 ]; then
+  step "Removing code-signing certificate '$CODESIGN_CERT_NAME' from keychain..."
+  run_cmd security delete-identity -t -c "$CODESIGN_CERT_NAME" "$KEYCHAIN"
+elif command -v security &>/dev/null && security find-certificate -c "$CODESIGN_CERT_NAME" "$KEYCHAIN" &>/dev/null; then
+  step "Removing code-signing certificate '$CODESIGN_CERT_NAME' from keychain..."
+  run_cmd security delete-identity -t -c "$CODESIGN_CERT_NAME" "$KEYCHAIN"
+fi
+
+echo ""
 echo "Uninstallation complete."
+echo "Note: To remove the leftover permission entry, open System Settings -> Privacy & Security -> Device Control and Data Access (Accessibility on macOS 26 and earlier) and remove mac-hardware-volume-control."
