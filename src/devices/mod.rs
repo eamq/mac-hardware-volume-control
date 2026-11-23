@@ -73,7 +73,7 @@ pub trait HardwareDevice: Send + Sync {
     /// can synchronize without causing a volume jump on startup or reconnect.
     fn read_volume(&mut self) -> Result<VolumeState, DeviceError>;
 
-    /// Writes the target 64-step volume state to the hardware.
+    /// Writes the target 65-step volume state to the hardware.
     fn write_volume(&mut self, state: VolumeState) -> Result<(), DeviceError>;
 
     /// Returns `true` if a CoreAudio default output device name belongs to this hardware.
@@ -83,6 +83,13 @@ pub trait HardwareDevice: Send + Sync {
             .coreaudio_name_hints
             .iter()
             .any(|hint| lower.contains(&hint.to_ascii_lowercase()))
+    }
+
+    /// Bundle ID prefixes of vendor control apps that require exclusive USB access
+    /// (e.g., `["com.focusrite."]`). When any matching app launches, the daemon
+    /// releases USB ownership until the app exits.
+    fn conflicting_app_prefixes(&self) -> &'static [&'static str] {
+        &[]
     }
 }
 

@@ -1,6 +1,6 @@
 //! Focusrite Scarlett (4th Gen) hardware volume driver.
 //!
-//! Maps the 64-step 1:1 linear grid (`0..=64`) to the Scarlett Gen 4 monitor
+//! Maps the 65-step 1:1 linear grid (`0-64`) to the Scarlett Gen 4 monitor
 //! output level and mute state, reading the current hardware level on connect
 //! to prevent sudden volume jumps.
 
@@ -126,7 +126,7 @@ impl ScarlettGen4Device {
         Self { transport }
     }
 
-    /// Converts a 64-step linear volume state to a 16-bit normalized raw value (`0..=0xFFFF`).
+    /// Converts a 65-step linear volume state to a 16-bit normalized raw value (`0..=0xFFFF`).
     /// Preserves the underlying volume level when muted so hardware `muteSwitch` handles muting.
     #[must_use]
     pub fn state_to_raw(state: VolumeState) -> u16 {
@@ -137,7 +137,7 @@ impl ScarlettGen4Device {
         (ratio * f32::from(u16::MAX)).round() as u16
     }
 
-    /// Converts a 16-bit normalized raw value (`0..=0xFFFF`) back to the nearest 64-step state.
+    /// Converts a 16-bit normalized raw value (`0..=0xFFFF`) back to the nearest 65-step state.
     #[must_use]
     pub fn raw_to_state(raw: u16, muted: bool) -> VolumeState {
         let ratio = f32::from(raw) / f32::from(u16::MAX);
@@ -172,6 +172,10 @@ impl HardwareDevice for ScarlettGen4Device {
     fn write_volume(&mut self, state: VolumeState) -> Result<(), DeviceError> {
         let raw = Self::state_to_raw(state);
         self.transport.set_monitor_level(raw, state.is_muted())
+    }
+
+    fn conflicting_app_prefixes(&self) -> &'static [&'static str] {
+        &["com.focusrite."]
     }
 }
 
