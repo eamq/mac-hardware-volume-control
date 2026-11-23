@@ -1,8 +1,8 @@
-//! macOS 26/27 (Tahoe+) Liquid Glass capsule HUD backend.
+//! macOS 26/27 (Tahoe+) native OSD HUD backend.
 //!
-//! Dispatches native volume/mute HUD updates through `OSD.framework` ->
-//! `com.apple.OSDUIHelper` using the full 64-step discrete grid so the capsule
-//! bar aligns 1:1 with the hardware LED ring.
+//! Dispatches native volume/mute HUD updates through `com.apple.OSDUIHelper`
+//! (with `OSDManager` fallback) using the 0-64 discrete grid so the HUD bar
+//! aligns 1:1 with the hardware LED ring.
 
 use super::osd_framework::{show_chiclet_hud, OSD_GRAPHIC_MUTE, OSD_GRAPHIC_VOLUME};
 use super::{MacOsVersion, OsdBackend, OsdError};
@@ -20,7 +20,7 @@ impl LiquidGlassOsd {
         Self
     }
 
-    /// Computes `(graphic_type, filled_chiclets, total_chiclets)` for the 64-step grid.
+    /// Computes `(graphic_type, filled_chiclets, total_chiclets)` for the 65-step grid.
     #[must_use]
     pub const fn hud_params(state: VolumeState) -> (u64, u32, u32) {
         if state.is_muted() {

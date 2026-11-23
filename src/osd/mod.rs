@@ -1,8 +1,8 @@
 //! Extensible macOS On-Screen Display (OSD) abstraction and version dispatch.
 //!
-//! Only the macOS 26/27 (Tahoe+) Liquid Glass backend is implemented up front.
-//! Older or future macOS HUD APIs can be added as standalone modules in
-//! `src/osd/` implementing [`OsdBackend`] and registered in [`select_backend`].
+//! Dispatches native volume/mute HUDs via `com.apple.OSDUIHelper` (since
+//! Tahoe's `SystemBannerService` is entitlement-gated). Additional macOS HUD
+//! backends can be added in `src/osd/` and registered in [`select_backend`].
 
 pub mod macos_liquid_glass;
 pub mod noop;
@@ -82,7 +82,7 @@ pub trait OsdBackend: Send + Sync {
     /// Returns `true` if this backend supports the given macOS version.
     fn supports_version(&self, version: MacOsVersion) -> bool;
 
-    /// Displays the native volume HUD for the given 64-step [`VolumeState`].
+    /// Displays the native volume HUD for the given 65-step [`VolumeState`].
     fn show_volume(&self, state: VolumeState) -> Result<(), OsdError>;
 }
 

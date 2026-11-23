@@ -24,7 +24,7 @@ extern "C" {
 extern "C" {
     fn CFRunLoopGetCurrent() -> *mut c_void;
     fn CFRunLoopAddSource(rl: *mut c_void, source: *mut c_void, mode: *const c_void);
-    static kCFRunLoopDefaultMode: *const c_void;
+    static kCFRunLoopCommonModes: *const c_void;
 }
 
 const K_IO_FIRST_MATCH: &[u8] = b"IOServiceFirstMatch\0";
@@ -65,7 +65,7 @@ impl UsbHotplugWatcher {
                 IONotificationPortDestroy(port);
                 return None;
             }
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
 
             let class_name = CString::new("IOUSBHostDevice").ok()?;
             let mut matched_iter: u32 = 0;

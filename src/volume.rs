@@ -1,9 +1,9 @@
-//! Discrete 64-step volume grid with 1:1 linear mapping.
+//! Discrete 65-step volume grid with 1:1 linear mapping.
 //!
-//! - Grid range: `0..=64` (65 discrete states, 64 audible/step increments).
+//! - Grid range: `0-64` (65 discrete states, 64 audible/step increments).
 //! - Standard F11 / F12 press: moves to the next/previous 1/16th tick (multiple of 4;
 //!   snaps to the nearest 1/16th in the press direction when on an intermediate tick).
-//! - `Option + Shift + F11 / F12` micro-step: `±1` step (64 fine steps).
+//! - `Option + Shift + F11 / F12` micro-step: `±1` step (65 fine steps ranging from 0 to 64).
 //! - Linear 1:1 mapping (`0%` = Mute, `25%` = step 16, `50%` = step 32, `100%` = step 64)
 //!   so the macOS HUD matches the physical LED ring on the audio interface.
 
@@ -26,7 +26,7 @@ pub enum VolumeAction {
     ToggleMute,
 }
 
-/// Immutable snapshot of the 64-step volume state.
+/// Immutable snapshot of the 65-step volume state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VolumeState {
     step: u8,
@@ -42,7 +42,7 @@ impl Default for VolumeState {
 }
 
 impl VolumeState {
-    /// Creates a new state clamped to `0..=64`.
+    /// Creates a new state clamped to `0-64`.
     /// If `step == 0`, `muted` is forced to `true`.
     #[must_use]
     pub fn from_step(step: u8, muted: bool) -> Self {
@@ -67,7 +67,7 @@ impl VolumeState {
         Self::from_step(step, muted)
     }
 
-    /// Returns the current discrete step (`0..=64`).
+    /// Returns the current discrete step (`0-64`).
     #[must_use]
     pub const fn step(self) -> u8 {
         self.step
