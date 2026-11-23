@@ -1,12 +1,13 @@
 //! User configuration loader for `~/.config/mac-hardware-volume-control/config.json`.
 
+use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_DEVICE_ID: &str = "scarlett-gen4";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct AppConfig {
     pub device_id: String,
 }
@@ -49,22 +50,16 @@ pub fn load_config(path: &Path) -> AppConfig {
     parse_config_json(&raw).unwrap_or_default()
 }
 
-/// Parses a minimal `{"device_id": "..."}` JSON payload without external dependencies.
+/// Parses `config.json` via `serde_json`, rejecting empty `device_id` values.
 #[must_use]
 pub fn parse_config_json(raw: &str) -> Option<AppConfig> {
-    let key_idx = raw.find("\"device_id\"")?;
-    let after_key = &raw[key_idx + "\"device_id\"".len()..];
-    let colon_idx = after_key.find(':')?;
-    let after_colon = after_key[colon_idx + 1..].trim_start();
-    let rest = after_colon.strip_prefix('"')?;
-    let end_quote = rest.find('"')?;
-    let device_id = rest[..end_quote].trim();
-    if device_id.is_empty() {
+    let mut cfg: AppConfig = serde_json::from_str(raw).ok()?;
+    let trimmed = cfg.device_id.trim();
+    if trimmed.is_empty() {
         return None;
     }
-    Some(AppConfig {
-        device_id: device_id.to_string(),
-    })
+    cfg.device_id = trimmed.to_string();
+    Some(cfg)
 }
 
 #[cfg(test)]
@@ -84,5 +79,6 @@ mod tests {
     fn returns_none_on_invalid_or_empty_device_id() {
         assert_eq!(parse_config_json("{}"), None);
         assert_eq!(parse_config_json(r#"{"device_id": ""}"#), None);
+        assert_eq!(parse_config_json("not json"), None);
     }
 }
