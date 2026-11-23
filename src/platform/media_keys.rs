@@ -9,6 +9,8 @@ use std::ptr;
 
 /// `NX_SYSDEFINED` event type (`14`) carrying media-key `NSSystemDefined` payloads.
 pub const K_CG_EVENT_SYS_DEFINED: u32 = 14;
+/// `kCGEventTapDisabledByTimeout` sent when WindowServer disables a slow tap.
+pub const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
 /// Subtype `8` indicates an `NX_SUBTYPE_AUX_CONTROL_BUTTONS` media key event.
 pub const NX_SUBTYPE_AUX_CONTROL_BUTTONS: i16 = 8;
 
@@ -157,6 +159,13 @@ impl MediaKeyTap {
         unsafe {
             CGEventTapEnable(self.tap, enabled);
         }
+    }
+}
+
+/// Re-enables a `CGEventTap` port directly from its callback proxy.
+pub unsafe fn reenable_tap(tap_port: *mut c_void) {
+    if !tap_port.is_null() {
+        CGEventTapEnable(tap_port, true);
     }
 }
 
