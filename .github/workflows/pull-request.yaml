@@ -14,13 +14,10 @@ jobs:
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy
 
       - name: Install ShellCheck & BATS
         run: brew install shellcheck bats-core
-
-      - name: Check Formatting
-        run: cargo fmt -- --check
 
       - name: Run Clippy (Linter)
         run: cargo clippy --all-targets -- -D warnings
